@@ -42,8 +42,7 @@ namespace SparkleShare {
         {
             NSApplication.Init ();
 
-            GitCommand.GitPath  = Path.Combine (NSBundle.MainBundle.ResourcePath, "git", "libexec", "git-core", "git");
-            GitCommand.ExecPath = Path.Combine (NSBundle.MainBundle.ResourcePath, "git", "libexec", "git-core");
+            GitCommand.GitPath  = "/usr/bin/git";
         }
 
 
