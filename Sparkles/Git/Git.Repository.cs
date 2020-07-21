@@ -81,8 +81,6 @@ namespace Sparkles.Git {
 
             git_config = new GitCommand (LocalPath, "config core.sshCommand " + GitCommand.FormatGitSSHCommand (auth_info));
             git_config.StartAndWaitForExit();
-
-            PrepareGitLFS ();
         }
 
 
@@ -215,8 +213,6 @@ namespace Sparkles.Git {
             if (message != null)
                 Commit (message);
 
-            PrepareGitLFS ();
-
             var git_push = new GitCommand (LocalPath, string.Format ("push --all --progress origin", RemoteUrl), auth_info);
             git_push.StartInfo.RedirectStandardError = true;
             git_push.Start ();
@@ -238,11 +234,6 @@ namespace Sparkles.Git {
 
         public override bool SyncDown ()
         {
-            string lfs_is_behind_file_path = Path.Combine (LocalPath, ".git", "lfs", "is_behind");
-
-            if (StorageType == StorageType.LargeFiles)
-                File.Create (lfs_is_behind_file_path).Close ();
-
             var git_fetch = new GitCommand (LocalPath, "fetch --progress origin " + branch, auth_info);
 
             git_fetch.StartInfo.RedirectStandardError = true;
@@ -259,20 +250,6 @@ namespace Sparkles.Git {
             }
 
             if (Merge ()) {
-                if (StorageType == StorageType.LargeFiles) {
-                    // Pull LFS files manually to benefit from concurrency
-                    var git_lfs_pull = new GitCommand (LocalPath, "lfs pull origin", auth_info);
-                    git_lfs_pull.StartAndWaitForExit ();
-
-                    if (git_lfs_pull.ExitCode != 0) {
-                        Error = ErrorStatus.HostUnreachable;
-                        return false;
-                    }
-
-                    if (File.Exists (lfs_is_behind_file_path))
-                        File.Delete (lfs_is_behind_file_path);
-                }
-
                 UpdateSizes ();
                 return true;
             }
@@ -284,9 +261,6 @@ namespace Sparkles.Git {
         bool ReadStream (GitCommand command)
         {
             StreamReader output_stream = command.StandardError;
-
-            if (StorageType == StorageType.LargeFiles)
-                output_stream = command.StandardOutput;
 
             double percentage = 0;
             double speed = 0;
@@ -328,13 +302,6 @@ namespace Sparkles.Git {
 
         public override bool HasUnsyncedChanges {
             get {
-                if (StorageType == StorageType.LargeFiles) {
-                    string lfs_is_behind_file_path = Path.Combine (LocalPath, ".git", "lfs", "is_behind");
-
-                    if (File.Exists (lfs_is_behind_file_path))
-                        return true;
-                }
-
                 string unsynced_file_path =  Path.Combine (LocalPath, ".git", "has_unsynced_changes");
                 return File.Exists (unsynced_file_path);
             }
@@ -882,36 +849,6 @@ namespace Sparkles.Git {
             }
 
             return change;
-        }
-
-
-        // The pre-push hook may have been changed by Git LFS, overwrite it to use our own configuration
-        void PrepareGitLFS ()
-        {
-            string pre_push_hook_path = Path.Combine (LocalPath, ".git", "hooks", "pre-push");
-            string pre_push_hook_content;
-
-            if (InstallationInfo.OperatingSystem == OS.macOS || InstallationInfo.OperatingSystem == OS.Windows) {
-                pre_push_hook_content =
-                    "#!/bin/sh" + Environment.NewLine +
-                    "env GIT_SSH_COMMAND='" + GitCommand.FormatGitSSHCommand (auth_info) + "' " +
-                    Path.Combine (Configuration.DefaultConfiguration.BinPath, "git-lfs").Replace ("\\", "/")  + " pre-push \"$@\"";
-
-            } else {
-                pre_push_hook_content =
-                    "#!/bin/sh" + Environment.NewLine +
-                    "env GIT_SSH_COMMAND='" + GitCommand.FormatGitSSHCommand (auth_info) + "' " +
-                    "git-lfs pre-push \"$@\"";
-            }
-
-            if (InstallationInfo.OperatingSystem != OS.Windows) {
-                // TODO: Use proper API
-                var chmod = new Command ("chmod", "700 " + pre_push_hook_path);
-                chmod.StartAndWaitForExit ();
-            }
-
-            Directory.CreateDirectory (Path.GetDirectoryName (pre_push_hook_path));
-            File.WriteAllText (pre_push_hook_path, pre_push_hook_content);
         }
 
 
